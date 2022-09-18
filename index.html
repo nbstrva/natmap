@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="acid">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>natmap</title>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=default"></script>
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@2.28.0/dist/full.css" rel="stylesheet" type="text/css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="//unpkg.com/alpinejs" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+    <script>
+        function spy(x) {
+            console.log(x)
+            return x
+        }
+
+        function getMarkers() {
+            return JSON.parse(localStorage.getItem("markers") || "[]");
+        }
+
+        function resetMarkers() {
+            localStorage.removeItem('markers')
+            window.dispatchEvent(new CustomEvent("markers-updated"))
+
+        }
+
+        async function uploadMarkerPhoto(event) {
+            const avatarFile = event.target.files[0]
+            const key = avatarFile.name + ':' + Date.now()
+            const { data, error } = await supaClient.storage
+                .from('place-images')
+                .upload(key, avatarFile)
+            photoUrl = await supaClient.storage
+                .from('place-images')
+                .getPublicUrl(key)
+                .publicURL
+            console.log(photoUrl)
+        }
+
+        function initMap() {
+            const myLatLng = { lat: 38.74348535160512, lng: -9.151076752577671 };
+            const map = new google.maps.Map(document.getElementById("map"), {
+                zoom: 12,
+                center: myLatLng,
+                disableDefaultUI: true,
+            });
+            class Popup extends google.maps.OverlayView {
+
+                constructor(position, content) {
+                    super();
+                    this.position = position;
+
+                    content.classList.add("popup-bubble");
+
+                    // This zero-height div is positioned at the bottom of the bubble.
+                    const bubbleAnchor = document.createElement("div");
+
+                    bubbleAnchor.classList.add("popup-bubble-anchor");
+                    bubbleAnchor.appendChild(content);
+
+                    // This zero-height div is positioned at the bottom of the tip.
+                    this.containerDiv = document.createElement("div");
+                    this.containerDiv.classList.add("popup-container");
+                    this.containerDiv.appendChild(bubbleAnchor);
+
+                    // Optionally stop clicks, etc., from bubbling up to the map.
+                    Popup.preventMapHitsAndGesturesFrom(this.containerDiv);
+                }
+
+                /** Called when the popup is added to the map. */
+                onAdd() {
+                    this.getPanes().floatPane.appendChild(this.containerDiv);
+                }
+
+                /** Called when the popup is removed from the map. */
+                onRemove() {
+                    if (this.containerDiv.parentElement) {
+                        this.containerDiv.parentElement.removeChild(this.containerDiv);
+                    }
+                }
+
+                /** Called each frame when the popup needs to draw itself. */
+                draw() {
+                    const divPosition = this.getProjection().fromLatLngToDivPixel(
+                        this.position
+                    );
+
+                    // Hide the popup when it is far out of view.
+                    const display =
+                        Math.abs(divPosition.x) < 4000 && Math.abs(divPosition.y) < 4000
+                            ? "block"
+                            : "none";
+
+                    if (display === "block") {
+                        this.containerDiv.style.left = divPosition.x + "px";
+                        this.containerDiv.style.top = divPosition.y + "px";
+                    }
+
+                    if (this.containerDiv.style.display !== display) {
+                        this.containerDiv.style.display = display;
+                    }
+                }
+            }
+
+            function geocodeLatLng(
+                geocoder,
+                latlng,
+            ) {
+                return geocoder
+                    .geocode({ location: latlng })
+                    .then((response) => {
+                        if (response.results[0]) {
+                            return response.results[0].formatted_address
+                        } else {
+                            window.alert("No results found");
+                            return null
+                        }
+
+                    })
+                    .catch((e) => window.alert("Geocoder failed due to: " + e));
+            }
+
+            const geocoder = new google.maps.Geocoder();
+            map.addListener("click", async (mapsMouseEvent) => {
+                xxx = mapsMouseEvent
+                let latlng = mapsMouseEvent.latLng
+                console.log(latlng.lat(), latlng.lng())
+
+                var form = document.getElementById("marker-form")
+                form.classList.remove('hidden')
+                var addressDiv = document.getElementById("marker-address")
+                geocodeLatLng(geocoder, latlng)
+                    .then(address => {
+                        addressDiv.innerText = address
+                    })
+
+
+                let popup = new Popup(
+                    mapsMouseEvent.latLng,
+                    form,
+                );
+                popup.setMap(map);
+            });
+
+            var save = document.getElementById("marker-save")
+            save.addEventListener(
+                "click",
+                async () => {
+                    const markers = getMarkers();
+                    var addressDiv = document.getElementById("marker-address")
+                    var titleInput = document.getElementById("marker-title")
+                    var commentInput = document.getElementById("marker-comment")
+
+                    const newMarker = {
+                        address: addressDiv.innerText,
+                        title: titleInput.value,
+                        comment: commentInput.value,
+                        photoUrl,
+                        timestamp: Date.now(),
+                    };
+                    markers.push(newMarker)
+                    localStorage.setItem("markers", JSON.stringify(markers))
+
+                    window.dispatchEvent(new CustomEvent("markers-updated"))
+                }
+            );
+
+        }
+
+        window.initMap = initMap;
+
+        const supaClient = supabase.createClient(
+            'https://kumkcoyfypoxiibcpcpf.supabase.co',
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt1bWtjb3lmeXBveGlpYmNwY3BmIiwicm9sZSI6ImFub24iLCJpYXQiOjE2NjM1MzUxNzYsImV4cCI6MTk3OTExMTE3Nn0.TUA0ExUYpN40X4dsKCdoWBBxvCExBRaDAtAGeCEyvw8'
+        )
+        async function signInWithEmail() {
+            const { user, error } = await supaClient.auth.signIn({
+                email: 'nbstrva@gmail.com',
+            })
+        }
+        if (!supaClient.auth.currentUser) {
+            signInWithEmail()
+        }
+    </script>
+
+    <style>
+        /* The popup bubble styling. */
+        .popup-bubble {
+            /* Position the bubble centred-above its parent. */
+            position: absolute;
+            top: 0;
+            left: 0;
+            transform: translate(-50%, -100%);
+            /* Style the bubble. */
+            background-color: white;
+            padding: 5px;
+            border-radius: 24px;
+            font-family: sans-serif;
+            overflow-y: auto;
+            /* max-height: 60px; */
+            box-shadow: 0px 2px 10px 1px rgba(0, 0, 0, 0.5);
+        }
+
+        /* The parent of the bubble. A zero-height div at the top of the tip. */
+        .popup-bubble-anchor {
+            /* Position the div a fixed distance above the tip. */
+            position: absolute;
+            width: 100%;
+            bottom: 8px;
+            left: 0;
+        }
+
+        /* This element draws the tip. */
+        .popup-bubble-anchor::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            /* Center the tip horizontally. */
+            transform: translate(-50%, 0);
+            /* The tip is a https://css-tricks.com/snippets/css/css-triangle/ */
+            width: 0;
+            height: 0;
+            /* The tip is 8px high, and 12px wide. */
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-top: 8px solid white;
+        }
+
+        /* JavaScript will position this div at the bottom of the popup tip. */
+        .popup-container {
+            cursor: auto;
+            height: 0;
+            position: absolute;
+            /* The max width of the info window. */
+            width: 200px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="drawer drawer-mobile" x-data="{ markers: getMarkers() }"
+        @markers-updated.window="markers = getMarkers()">
+        <input id="my-drawer-2" type="checkbox" class="drawer-toggle" />
+        <div class="drawer-content flex flex-col items-center justify-center">
+            <!-- Page content here -->
+            <div id="map" class="w-screen h-screen"></div>
+            <label for="my-drawer-2" class="btn btn-primary drawer-button lg:hidden fixed top-0 left-0 mt-4 ml-4"">
+                <svg xmlns=" http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5"
+                stroke="currentColor" class="w-6 h-6">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+                </svg>
+            </label>
+
+        </div>
+        <div class="drawer-side">
+            <label for="my-drawer-2" class="drawer-overlay"></label>
+            <ul x-data class="menu px-8 py-4 overflow-y-auto w-96 bg-base-100 text-base-content space-y-8">
+                <template x-for="marker in markers">
+                    <li>
+                        <div class="card p-0 w-96- bg-base-100 shadow-xl">
+                            <figure class="mt-4"><img :src="marker.photoUrl" alt="Shoes" /></figure>
+                            <div class="card-body w-full p-6">
+                                <h2 class="card-title mb-2" x-text="marker.title">
+                                    <!-- <div class="badge badge-secondary">NEW</div> -->
+                                </h2>
+                                <p x-text="marker.comment"></p>
+                                <!-- <div class="card-actions justify-end">
+                                    <div class="badge badge-outline">Fashion</div>
+                                    <div class="badge badge-outline">Products</div>
+                                </div> -->
+                            </div>
+                        </div>
+                    </li>
+                </template>
+                <button class="btn btn-sm btn-error mt-4" @click="resetMarkers()">
+                    Reset data
+                </button>
+            </ul>
+
+        </div>
+    </div>
+
+    <div id="marker-form" class="hidden p-4 space-y-3">
+        <div id="marker-address">address</div>
+        <input id="marker-title" class="input input-sm input-primary w-full" placeholder="Title">
+        <textarea id="marker-comment" class="textarea border-primary leading-tight w-full"
+            placeholder="My favourite café"></textarea>
+        <input type="file" id="marker-photo" name="marker-photo" accept="image/png, image/jpeg"
+            @change="uploadMarkerPhoto(event)">
+        <button id="marker-save" class="btn btn-primary btn-sm w-full">Save</button>
+    </div>
+
+    <script
+        src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCmtlEl1nzlgLGdNRnk-M5qeXIUbr_o3zM&callback=initMap&v=weekly"
+        defer></script>
+</body>
+
+</html>
