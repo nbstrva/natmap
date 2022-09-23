@@ -12,6 +12,10 @@
     <script src="//unpkg.com/alpinejs" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
     <script>
+        let map = null;
+        let photoUrl = null;
+        let makePopup = null;
+
         function spy(x) {
             console.log(x)
             return x
@@ -27,7 +31,32 @@
 
         }
 
+        function drawDot(marker) {
+            const { latlng, photoUrl } = marker
+            var dot = document.getElementById("dot").cloneNode(true)
+            dot.classList.remove("hidden")
+            const image = dot.querySelector(".dot-image")
+            image.src = photoUrl
+            dot.querySelector(".dot-address").innerText = marker.address
+            dot.querySelector(".dot-title").innerText = marker.title
+            dot.querySelector(".dot-comment").innerText = marker.comment
+            dot.addEventListener("click", () => {
+                image.classList.add("hidden")
+
+                const details = dot.querySelector(".dot-details")
+                details.classList.remove("hidden")
+            })
+            let popup = makePopup({
+                position: latlng,
+                content: dot,
+                map,
+            });
+
+
+        }
+
         async function uploadMarkerPhoto(event) {
+            photoUrl = "loading"
             const avatarFile = event.target.files[0]
             const key = avatarFile.name + ':' + Date.now()
             const { data, error } = await supaClient.storage
@@ -38,18 +67,19 @@
                 .getPublicUrl(key)
                 .publicURL
             console.log(photoUrl)
+            return photoUrl
         }
 
         function initMap() {
             const myLatLng = { lat: 38.74348535160512, lng: -9.151076752577671 };
-            const map = new google.maps.Map(document.getElementById("map"), {
+            map = new google.maps.Map(document.getElementById("map"), {
                 zoom: 12,
                 center: myLatLng,
                 disableDefaultUI: true,
             });
             class Popup extends google.maps.OverlayView {
 
-                constructor(position, content) {
+                constructor({ position, content, map }) {
                     super();
                     this.position = position;
 
@@ -68,6 +98,8 @@
 
                     // Optionally stop clicks, etc., from bubbling up to the map.
                     Popup.preventMapHitsAndGesturesFrom(this.containerDiv);
+
+                    super.setMap(map)
                 }
 
                 /** Called when the popup is added to the map. */
@@ -104,6 +136,9 @@
                     }
                 }
             }
+            makePopup = args => new Popup(args)
+
+
 
             function geocodeLatLng(
                 geocoder,
@@ -124,9 +159,9 @@
             }
 
             const geocoder = new google.maps.Geocoder();
+            let latlng = null;
             map.addListener("click", async (mapsMouseEvent) => {
-                xxx = mapsMouseEvent
-                let latlng = mapsMouseEvent.latLng
+                latlng = mapsMouseEvent.latLng
                 console.log(latlng.lat(), latlng.lng())
 
                 var form = document.getElementById("marker-form")
@@ -137,24 +172,26 @@
                         addressDiv.innerText = address
                     })
 
-
-                let popup = new Popup(
-                    mapsMouseEvent.latLng,
-                    form,
-                );
-                popup.setMap(map);
+                let popup = makePopup({
+                    position: mapsMouseEvent.latLng,
+                    content: form,
+                    map,
+                });
             });
 
             var save = document.getElementById("marker-save")
             save.addEventListener(
                 "click",
                 async () => {
+                    if (photoUrl === "loading") return;
+
                     const markers = getMarkers();
                     var addressDiv = document.getElementById("marker-address")
                     var titleInput = document.getElementById("marker-title")
                     var commentInput = document.getElementById("marker-comment")
 
                     const newMarker = {
+                        latlng,
                         address: addressDiv.innerText,
                         title: titleInput.value,
                         comment: commentInput.value,
@@ -164,10 +201,14 @@
                     markers.push(newMarker)
                     localStorage.setItem("markers", JSON.stringify(markers))
 
-                    window.dispatchEvent(new CustomEvent("markers-updated"))
+                    window.dispatchEvent(new CustomEvent("markers-updated", { detail: newMarker }))
+
+                    var form = document.getElementById("marker-form")
+                    form.classList.add('hidden')
                 }
             );
 
+            getMarkers().map(drawDot)
         }
 
         window.initMap = initMap;
@@ -262,7 +303,7 @@
                 <template x-for="marker in markers">
                     <li>
                         <div class="card p-0 w-96- bg-base-100 shadow-xl">
-                            <figure class="mt-4"><img :src="marker.photoUrl" alt="Shoes" /></figure>
+                            <figure class="mt-4" x-show="marker.photoUrl"><img :src="marker.photoUrl" /></figure>
                             <div class="card-body w-full p-6">
                                 <h2 class="card-title mb-2" x-text="marker.title">
                                     <!-- <div class="badge badge-secondary">NEW</div> -->
@@ -292,6 +333,15 @@
         <input type="file" id="marker-photo" name="marker-photo" accept="image/png, image/jpeg"
             @change="uploadMarkerPhoto(event)">
         <button id="marker-save" class="btn btn-primary btn-sm w-full">Save</button>
+    </div>
+
+    <div id="dot" class="hidden cursor-pointer" x-data @markers-updated.window="drawDot(event.detail)">
+        <img class="dot-image w-12 h-12 rounded-full" />
+        <div class="dot-details p-4 hidden">
+            <div class="dot-address mb-4 hidden"></div>
+            <div class="dot-title text-xl font-bold mb-4"></div>
+            <div class="dot-comment text-md"></div>
+        </div>
     </div>
 
     <script
